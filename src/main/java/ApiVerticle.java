@@ -36,7 +36,9 @@ public class ApiVerticle extends AbstractVerticle {
     router.get("/products/:id")
       .handler(this::validateProductId)
       .respond(this::fetchProduct);
-    router.post("/products").handler(this::appendProduct);
+    router.post("/products")
+      .handler(this::validateProduct)
+      .handler(this::appendProduct);
 
     return vertx.createHttpServer()
       .requestHandler(router::handle)
@@ -53,6 +55,7 @@ public class ApiVerticle extends AbstractVerticle {
   private void validateProductId(RoutingContext rc) {
     try {
       rc.put("productId", Long.parseLong(rc.pathParam("id")));
+      rc.next();
     } catch (NumberFormatException e) {
       rc.fail(e);
     }
@@ -64,9 +67,7 @@ public class ApiVerticle extends AbstractVerticle {
       .withSession(session -> session.find(Product.class, productId));
   }
 
-  // TODO : cannot handle 201 code currently
-  // this is a 4.1 feature
-  private void appendProduct(RoutingContext rc) {
+  private void validateProduct(RoutingContext rc) {
     JsonObject json = rc.getBodyAsJson();
     String name;
     BigDecimal price;
@@ -75,21 +76,29 @@ public class ApiVerticle extends AbstractVerticle {
       requireNonNull(json, "The incoming JSON document cannot be null");
       name = requireNonNull(json.getString("name"), "The product name cannot be null");
       price = new BigDecimal(json.getString("price"));
-    } catch (Throwable err) {
-      logger.error("Could not extract values", err);
-      rc.fail(400);
-      return;
-    }
 
-    dispatch("appendProduct", rc, session -> {
       Product product = new Product();
       product.setName(name);
       product.setPrice(price);
-      return session
+
+      rc.put("product", product);
+      rc.next();
+    } catch (Throwable err) {
+      logger.error("Could not extract values", err);
+      rc.fail(400, err);
+    }
+  }
+
+  // TODO : cannot handle 201 code currently
+  // this is a 4.1 feature
+  private void appendProduct(RoutingContext rc) {
+
+    Product product = rc.get("product");
+    dispatch("appendProduct", rc, session ->
+      session
         .persist(product)
         .chain(session::flush)
-        .chain(done -> rc.response().setStatusCode(201).end());
-    });
+        .chain(done -> rc.response().setStatusCode(201).end()));
   }
 
   private <T> void dispatch(String operation, RoutingContext rc, Function<Mutiny.Session, Uni<T>> block) {
