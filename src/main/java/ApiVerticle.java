@@ -32,8 +32,10 @@ public class ApiVerticle extends AbstractVerticle {
     BodyHandler bodyHandler = BodyHandler.create();
     router.post().handler(bodyHandler::handle);
 
-    router.get("/products").respond(rc -> listProducts());
-    router.get("/products/:id").respond(this::fetchProduct);
+    router.get("/products").respond(this::listProducts);
+    router.get("/products/:id")
+      .handler(this::validateProductId)
+      .respond(this::fetchProduct);
     router.post("/products").handler(this::appendProduct);
 
     return vertx.createHttpServer()
@@ -43,22 +45,23 @@ public class ApiVerticle extends AbstractVerticle {
       .replaceWithVoid();
   }
 
-  private Uni<List<Product>> listProducts() {
+  private Uni<List<Product>> listProducts(RoutingContext rc) {
     return emf.withSession(session -> session.createQuery("from Product", Product.class)
       .getResultList());
   }
 
+  private void validateProductId(RoutingContext rc) {
+    try {
+      rc.put("productId", Long.parseLong(rc.pathParam("id")));
+    } catch (NumberFormatException e) {
+      rc.fail(e);
+    }
+  }
+
   private Uni<Product> fetchProduct(RoutingContext rc) {
-    return emf.withSession(session -> {
-      long id;
-      try {
-        String idParam = rc.pathParam("id");
-        id = Long.parseLong(idParam);
-      } catch (Exception e) {
-        return Uni.createFrom().failure(e);
-      }
-      return session.find(Product.class, id);
-    });
+    long productId = rc.get("productId");
+    return emf
+      .withSession(session -> session.find(Product.class, productId));
   }
 
   // TODO : cannot handle 201 code currently
